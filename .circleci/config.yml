@@ -101,7 +101,7 @@ workflows:
   version: 2
   test-and-push:
     jobs:
-      - build-test:
+      - build-test
       - push-container-image:
           requires:
             - build-test
