@@ -30,12 +30,6 @@ commands:
             docker push registry.digitalocean.com/destashd/kubernetes-cloudflare-sync:${CIRCLE_SHA1}
 
 jobs:
-  integration-test-docker:
-    executor: ci-base
-    environment:
-      KUBECONFIG_DATA: dGVzdA==
-    steps:
-      - integration-tests
   build-test:
     docker:
       - image: docker:20.10.8-git
