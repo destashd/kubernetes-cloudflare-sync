@@ -1,0 +1,119 @@
+version: 2.1
+
+orbs:
+  doctl: digitalocean/cli@0.1.1
+  k8s: digitalocean/k8s@0.1.1
+  kubernetes: circleci/kubernetes@0.12.0
+  orb-tools: circleci/orb-tools@10.0.4
+
+executors:
+  ci-base:
+    docker:
+      - image: cimg/base:stable
+
+commands:
+  build-container:
+    steps:
+      - run:
+          name: Build container image
+          command: |
+            docker build . -t registry.digitalocean.com/destashd/kubernetes-cloudflare-sync:${CIRCLE_SHA1}
+  push-container-image:
+    steps:
+      - run:
+          name: Authenticate with DO
+          command: |
+            doctl registry login --expiry-seconds 600
+      - run:
+          name: Push container image
+          command: |
+            docker push registry.digitalocean.com/destashd/kubernetes-cloudflare-sync:${CIRCLE_SHA1}
+
+jobs:
+  integration-test-docker:
+    executor: ci-base
+    environment:
+      KUBECONFIG_DATA: dGVzdA==
+    steps:
+      - integration-tests
+  build-test:
+    docker:
+      - image: docker:20.10.8-git
+    steps:
+      - checkout
+      - setup_remote_docker
+      - build-container
+    working_directory: /app
+  deploy:
+    executor: ci-base
+    steps:
+      - install
+      - checkout
+      - run: |
+          install_software () {
+              COMMAND=${1}
+              CHECKSUM=${2}
+              VERSION=${3}
+              DOWNLOAD_URL=${4}
+
+              if ! [ -x "$(command -v ${COMMAND})" ]; then
+                  wget -O ${COMMAND}-${VERSION}-linux-amd64 ${DOWNLOAD_URL}
+                  echo "${CHECKSUM}  ${COMMAND}-${VERSION}-linux-amd64" > ${COMMAND}-${VERSION}-SHA256SUM
+                  sha256sum -c ${COMMAND}-${VERSION}-SHA256SUM
+
+                  if [ $? -eq 0 ]; then
+                      if [ ${COMMAND} == "terraform" ]; then
+                          which unzip || apt-get update && apt-get install -y unzip
+                          unzip ${COMMAND}-${VERSION}-linux-amd64 -d opt
+                      else
+                          chmod +x ${COMMAND}-${VERSION}-linux-amd64
+                          mv ${COMMAND}-${VERSION}-linux-amd64 opt/${COMMAND}
+                      fi
+                  else
+                      echo "Checksum for ${COMMAND}-${VERSION}-linux-amd64 does not match the expected checksum."
+                      exit 1
+                  fi
+              fi
+          }
+          GOMPLATE_CHECKSUM=eec0f85433c9c8aad93e8cd84c79d238f436b3e62f35b15471f5929bc741763a
+          GOMPLATE_VERSION=3.10.0
+          GOMPLATE_URL="https://github.com/hairyhenderson/gomplate/releases/download/v${GOMPLATE_VERSION}/gomplate_linux-amd64"
+          install_software gomplate ${GOMPLATE_CHECKSUM} ${GOMPLATE_VERSION} ${GOMPLATE_URL}
+      - run: |
+          opt/gomplate --input-dir=k8s --output-dir=k8s-gomplated
+      - initialize:
+          cluster: development
+      - kubernetes/create-or-update-resource:
+          resource-file-path: "k8s-gomplated/overlays/development"
+          resource-name: "deployment/cloudflare-sync"
+          kustomize: true
+          get-rollout-status: true
+          show-kubectl-command: true
+      - kubernetes/get-rollout-status:
+          resource-name: "deployment/cloudflare-syunc"
+          watch-rollout-status: true
+  push-container-image:
+    executor: ci-base
+    steps:
+      - install
+      - initialize:
+          cluster: development
+      - checkout
+      - setup_remote_docker
+      - build-container
+      - push-container-image
+
+workflows:
+  version: 2
+  test-and-push:
+    jobs:
+      - integration-test-docker
+      - build-test:
+          requires:
+            - integration-test-docker
+      - push-container-image:
+          requires:
+            - build-test
+      - deploy:
+          requires:
+            - push-container-image

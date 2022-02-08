@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubernetes-cloudflare-sync
+  labels:
+    app: kubernetes-cloudflare-sync
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubernetes-cloudflare-sync
+  template:
+    metadata:
+      labels:
+        app: kubernetes-cloudflare-sync
+    spec:
+      serviceAccountName: kubernetes-cloudflare-sync
+      containers:
+      - name: kubernetes-cloudflare-sync
+        image: registry.digitalocean.com/destashd/kubernetes-cloudflare-sync:latest
+        args:
+        - --dns-name=k8s-dev.destashd.com
+        env:
+        - name: CF_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: cloudflare-sync
+              key: api-token
