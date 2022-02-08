@@ -86,6 +86,11 @@ jobs:
       - kubernetes/get-rollout-status:
           resource-name: "deployment/cloudflare-syunc"
           watch-rollout-status: true
+  install:
+    description: Install `doctl` and `kubectl`.
+    steps:
+      - doctl/install
+      - k8s/install
   push-container-image:
     executor: ci-base
     steps:
